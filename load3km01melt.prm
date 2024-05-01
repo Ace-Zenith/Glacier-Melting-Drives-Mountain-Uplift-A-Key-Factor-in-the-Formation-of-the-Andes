@@ -1,0 +1,218 @@
+# Thickness 70km
+set Dimension = 2
+set World builder file = /data/home/geodynjlu/workplace/sli/benchmark/thick70kmelas.wb
+set Use years in output instead of seconds = true
+set End time = 270e3 #300e3 10.3e6
+set Output directory = loadall3km01melt
+
+set Nonlinear solver scheme                = single Advection, single Stokes
+set Nonlinear solver tolerance              = 1e-6
+set Max nonlinear iterations                = 30
+set CFL number                              = 0.5
+set Pressure normalization                  = no
+set Timing output frequency                 = 500
+set Maximum time step = 1e3 #
+
+set Resume computation =  auto
+
+subsection Solver parameters
+  subsection Stokes solver parameters
+    set Number of cheap Stokes solver steps = 200
+  end
+end
+
+subsection Checkpointing
+  set Steps between checkpoint = 270 #30 500
+end
+
+# GEOMETRY AND GRAVITY MODEL
+subsection Geometry model
+  set Model name = box
+  subsection Box
+    set X extent = 2000e3
+    set Y extent = 670e3
+    set X repetitions = 25
+    set Y repetitions = 9
+  end
+end
+
+# A gravity profile that follows the description of
+# the preliminary reference Earth model (PREM) by
+# Dziewonski & Anderson (1981),
+# https://doi.org/10.1016/0031-9201(81)90046-7.
+subsection Gravity model 
+  set Model name = ascii data
+  subsection Ascii data model
+    set Data directory = /data/home/geodynjlu/workplace/sli/benchmark/
+    set Data file name = prem.txt
+  end
+end
+
+ # COMPOSITIONAL FIELDS AND INITIAL MODEL
+subsection Compositional fields
+  set Number of fields = 10
+                      #0,       1,  2,  3,      4,          5,  6 ,7,8,9
+  set Names of fields =ve_stress_xx, ve_stress_yy, ve_stress_xy,mantle,  UC, LC, Clitho, weak_layer, OC, Olitho
+end 
+
+subsection Initial composition model
+  set Model name =  world builder
+end
+
+subsection Boundary composition model
+  set Fixed composition boundary indicators = left, right, bottom #describes which boundaries have a fixed composition
+#set Allow fixed composition on outflow boundaries = true #this parameter is set to false, except in models with melt transport
+  set List of model names = initial composition
+end 
+
+#Push the overriding plate 5cm/yr, 82km sp(40 Ma) and 70km op(70 Ma) 
+subsection Boundary velocity model
+  set Tangential velocity boundary indicators = bottom, left
+  set Prescribed velocity boundary indicators = right x:function
+  subsection Function
+    #5 cm/yr= 1.58e-9 m/s, 20km velocity transition zone
+    set Function constants  = dsp=82e3, db=670e3, vi=0.05,xhalf=500e3,dop=70e3,vo=-0.04,dtr=20e3, t1=270.e3                                                       
+    set Function expression = if(t<t1,0,if(z>db-dop,vo,if(z<db-dop-dtr,-vo*(dop+0.5*dtr)/(db-dtr-dop+0.5*dtr),\
+    (vo*(dop+0.5*dtr)/(db-dtr-dop+0.5*dtr)+vo)*(-1)/dtr*(db-dop-z)+vo)));0         
+    set Variable names      = x,z,t
+  end
+end
+
+subsection Initial temperature model
+  set Model name = world builder
+end
+
+subsection Boundary temperature model
+  set Fixed temperature boundary indicators = bottom , top
+  set List of model names = box
+  subsection Box
+    set Bottom temperature = 1964 #A Revised Adiabatic Temperature Profile for the Mantle(Tomoo Katsura 2022)
+    set Top temperature = 273
+  end
+end
+
+# Mesh refinement strategy
+subsection Mesh refinement
+  set Initial global refinement = 2
+  set Initial adaptive refinement = 3
+  set Skip solvers on initial refinement = false
+  set Strategy = viscosity , composition , temperature , density
+  set Time steps between mesh refinement = 10
+  set Coarsening fraction = 0.10
+  set Refinement fraction = 0.85
+end
+
+#no loading
+subsection Boundary traction model
+  set Prescribed traction boundary indicators = top y: function
+  subsection Function
+    set Variable names = x,y,t
+    set Function constants  = r0=1000e3,r1= 2000e3, H0=3e3, t1=270e3, t2=300.e3, rhoi=931, g=9.815  
+    # r0 is load radius, H0 is load height, rhoi is density of ice/load, g is surface gravity
+    # t1 is end of linear load increase and start of constant load
+    set Function expression = 0;x>=r0 & x<=r1 ? t<t1 ? abs(cos(t/100.*pi))==1.0 ? -g*H0*rhoi*t/t1 : -g*H0*rhoi*(t+50.)/t1 : t<t2 ? abs(cos(t/100.*pi))==1.0 ? -g*H0*rhoi*(1-(t-t1)/(t2-t1)) : -g*H0*rhoi*(1-(t+50.-t1)/(t2-t1)) : 0 : 0
+  end
+end
+
+subsection Mesh deformation
+  set Mesh deformation boundary indicators = top: free surface
+# this parameters allows to generate mesh movements along other boundaries that are open, or have prescribed material velocities or tractions.
+  set Additional tangential mesh velocity boundary indicators = left,right
+  subsection Free surface
+# when the surface deformation is large, advecting the surface vertically results in a better behaved mesh
+    set Surface velocity projection =  vertical 
+# zero is no stabilization, and one is fully implicit
+    set Free surface stabilization theta = 1
+  end
+end
+
+subsection Discretization
+  set Composition polynomial degree = 2
+  set Stokes velocity polynomial degree = 2
+  set Temperature polynomial degree = 2  
+  subsection Stabilization parameters
+    set Use artificial viscosity smoothing = true
+  end
+end
+
+subsection Formulation
+  set Enable elasticity = true
+end 
+
+subsection Material model
+  set Material averaging =   harmonic average only viscosity
+  set Model name = visco plastic
+  subsection Visco Plastic
+
+    set Reference temperature = 273
+    set Minimum strain rate = 1e-20 #1e-22
+    set Reference strain rate = 1e-15 #1e-19
+    set Minimum viscosity = 1e18
+    set Maximum viscosity = 1e24
+    set Viscosity averaging scheme = harmonic
+
+    set Grain size = 1e-3 #2e-3
+    set Heat capacities = 1200 #1250
+
+    set Include viscoelasticity                    = true
+    #from example Maaike F. M. Weerdesteijn
+    set Elastic shear moduli                       = 1.75e11,  1.75e11, 1.75e11, 1.75e11, 1.75e11,      4.5e10,       4.5e10,      1.75e11,       4.5e10,    4.5e10,      1.75e11, 
+    set Use fixed elastic time step                = false
+    set Fixed elastic time step                    = 1e3
+			                                             #bkg,        mantle, 	    UpperC, 	    LowerC, 	    Clitho,	      weak_layer,	  OceanC,     Olitho    
+    set Thermal diffusivities =                    8.333e-7, 8.333e-7,8.333e-7,8.333e-7,   8.333e-7,   7.4405e-07,   6.9444e-07,   8.3841e-07,    6.9444e-7,    6.9444e-07,  8.3841e-07
+    set Thermal conductivities =                   3.3,     3.3,  3.3,  3.3,      3.3,          2.5,          2.5,          3.3,          3.3,          2.5,        3.3
+    set Thermal expansivities =                    3.0e-5, 	3.0e-5,3.0e-5,3.0e-5,	  3.0e-5, 		  3.7e-5,       2.7e-5,       3.0e-5,       2.7e-5, 		  2.7e-5,     3e-5
+    set Densities = 	                             3300,  3300, 3300, 3300,		    3300, 		    2800,         3000,         3280, 		    3000, 	      3000,	      3280
+    set Viscous flow law = composite
+
+    set Prefactors for diffusion creep =         1e-9,     1e-9,1e-9,1e-9,   7.3955e-22,   1e-39,        1e-39,     	  1e-9,		      1e-39,        1e-39,      2.25e-15
+    set Activation energies for diffusion creep =  335e3,  335e3,335e3,335e3,     0,            335e3, 		    335e3,		    335e3,        0, 	   	      335e3,  	  375e3
+    set Activation volumes for diffusion creep =   4.8e-6,    4.8e-6,4.8e-6,4.8e-6,  0,            4e-6,	        4e-6,	        4.8e-6 ,	    0, 		        4e-6,	      1e-5,	 
+    set Grain size exponents for diffusion creep =  0,     0,0,0,     0,            0,            0,            0,            0,            0,          3
+
+    set Prefactors for dislocation creep =         2.3041e-14,  2.3041e-14,2.3041e-14,2.3041e-14,1.00e-39,     8.57e-28,     7.13e-18,     2.9682e-14,   2.2553e-17, 	1.3725e-25, 2.9682e-16
+    set Stress exponents for dislocation creep =   3.5,    3.5,3.5,3.5,     3.5,	        4, 	          3, 	          3.5,  	      2.3, 		      4.7,	      3.5
+    set Activation energies for dislocation creep =480e3,  480e3,480e3,480e3,     530e3,        223e3, 	      345e3, 	      515e3, 	      154e3, 		    485e3, 	    535e3
+    set Activation volumes for dislocation creep = 1.4e-5,   1.4e-5, 1.4e-5, 1.4e-5,    0, 	          0, 	          0,          	1.4e-5,	      1.2e-5,       0,          1.4e-5
+    set Angles of internal friction =              40, 	40,40,40,        30,           30,    	      30, 	        30,  	        2.8624,		    30, 	      0
+    set Cohesions =		                             4e7,    4e7,4e7,4e7,     4e7, 	        2e7,          4e7,          4e7,  	      1e6, 		      4e7, 	      5e8
+    
+    set Friction strain weakening factors =        1 ,              1,1,1,                         1,            0.2,          0.2,          0.2,          0.999,        0.0954,     1   
+    set Cohesion strain weakening factors =        1 ,            1,  1,  1,                             1,            1,            0.5,          0.5,          0.999,        0.01,       1   
+  end
+end
+
+ # POSTPROCESSING
+subsection Postprocess
+  set List of postprocessors = velocity statistics , temperature statistics ,heat flux statistics , visualization , basic statistics , topography,mass flux statistics, composition statistics,depth average
+  subsection Visualization
+    set Time between graphical output = 30e3 #10e3 5e5
+    set List of output variables = strain rate , viscosity , density, depth, surface stress,  error indicator,  principal stress,  shear stress, strain rate tensor,nonadiabatic pressure
+  end
+  subsection Topography
+   set Output to file = true
+   set Time between text output = 1e3
+  end
+  subsection Depth average
+   set List of output variables =  viscosity
+   set Number of zones = 67
+   set Output format =  txt 
+   set Time between graphical output = 1e3
+  end
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
